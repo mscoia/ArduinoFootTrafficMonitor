@@ -1,0 +1,143 @@
+/*   Program: GateTracker1
+     This program takes in an input of a button press (but could be configured to be any digital input). 
+     The number of hits are tracked over the course of a set number of intevals (1-512), and interval duration is set in program as well.
+     The purpose is to allow tracking of pedestrian traffic through something like a turnstyle (i.e. at a museum or amusement park).
+     This will aid users in future staffing decisions as they can estimate heavy traffic times.  The input is tracked for each interval and written to on-board EEPROM memory.
+     The intervals with the maximum frequency are then output to the user after all intervals are completed.  The output is sent
+     to both a console on a pc screen (if attached) and to an on-board lcd. 
+ */
+#include <EEPROM.h>
+#include <LiquidCrystal.h>
+
+const int buttonPin = 7;     // the number of the pushbutton pin
+const int ledPin =  13;      // the number of the LED pin
+const int STEPS = 30;        // the number of intervals to sample (**MUST BE 512 OR LESS**)
+const long interval = 500;   // the length of each interval in ms
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);         //initialize lcd with interface pin numbers
+
+
+int ledState = LOW;       // ledState used to set the LED
+int buttonState = 0;      // variable for reading the pushbutton status
+int count = 0;            // tracks number of button hits per interval
+int addr = 0;             // initializes read/write address for EEPROM
+int hit = 0;              // set true if button is pushed
+int marker = 0;           // sets true if button pushed but only tallies count when false
+byte value;               // value retrieved from EEPROM address
+byte maxval = 0;          // stores maximum count value found in EEPROM
+int maxcount = 0;         // tracks how many times the max value happened in all intervals
+int totcount = 0;         // tracks total number of button hits
+
+unsigned long previousMillis = 0;        // will store last time LED was updated
+
+void setup() {
+  // set the digital pin as output:
+  pinMode(ledPin, OUTPUT);  
+  // initialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT); 
+  lcd.begin(16, 2);
+  Serial.begin(9600);  
+}
+
+void loop()
+{
+  unsigned long currentMillis = millis();   // variable equal to time since program started, in ms
+
+  buttonState = digitalRead(buttonPin);     // read the state of the pushbutton value:
+
+  if (buttonState == HIGH) {   // check if the pushbutton is pressed.    
+    
+    digitalWrite(ledPin, HIGH);     // turn LED on:
+    hit = 1;                         // set hit trigger to true
+    marker = 1;                      // set marker to true, program will wait until button is released to add to count
+    delay(50);                       // delay to avoid duplicate counts between button press/release cycles
+  }
+  else if(buttonState == LOW){      // check to see if pushbutton is released
+      digitalWrite(ledPin, LOW);    // turn LED off
+      marker = 0;                   // set marker to false to allow count to increment
+      delay(50);                    // another delay to avoid duplicate counts between press/release cycle
+  }
+    
+  if(hit==1 && marker==0){          // checks to see if button was pressed and released
+    count = count + 1;              // increments count if true
+    totcount = totcount + 1;        // increments total count also
+    hit = 0;                        // resets hit trigger
+  }
+  
+  if(currentMillis - previousMillis >= interval) {    // checks to see of interval time is finished
+
+    previousMillis = currentMillis;   // updates current interval time
+    Serial.println(count);            // prints current interval count 
+    EEPROM.write(addr, count);        // writes count to EEPROM at current address location
+    count = 0;                        // resets interval count 
+    addr = addr + 1;                  // increments address location for next write
+
+    
+    if (addr == STEPS){               // checks to see if max number of intervals has been reached
+
+      addr = 0;                       // reset address to beginning location in EEPROM
+
+      while (1) {                     // start loop for reading EEPROM
+
+        digitalWrite(ledPin, HIGH);   // turn on LED solid to indicate intervals are done
+        value = EEPROM.read(addr); // read value at current address in EEPROM
+
+        if(value==maxval){            // check if current value is equal to maximum value so far
+          maxcount = maxcount + 1;    // if so, increment total number of maximum value count (AKA number of times the max value happened)
+        }
+
+        if(value>maxval){             // check if current value is greater than current max value
+          maxcount = 1;               // if so, set max value count to 1
+          maxval = value;             // save maximum count value as the current value
+        }
+  
+        addr = addr + 1;              // move to next address in EEPROM
+
+        if (addr == STEPS){           // check to see if end of data in EEPROM has been reached
+          if(totcount==0){            // check to make sure at least one hit occured
+            Serial.print("There were no customers today! Oh no!");
+            lcd.print("No Customers!!");
+            while(1){}    // endless empty loop if no hits
+          }
+          Serial.print("Total count was ");     // prints total count to pc console
+          Serial.print(totcount);
+          Serial.println();          
+          Serial.print("Highest value was ");    // prints maximum value to pc console
+          Serial.print(maxval);
+          Serial.println();
+          Serial.print("And it happened ");      // prints frquency of maximum value to pc console
+          Serial.print(maxcount);
+          Serial.print(" times.");
+          Serial.println();      
+          Serial.print("It happened at the following timestamps: ");   // prints timestamps of max values to pc console
+          Serial.println();
+              for(int i = 0; i <= STEPS; i++){
+                if(EEPROM.read(i)==maxval){
+                  Serial.print(i);
+                  Serial.print("\t");
+                }
+              }              
+
+          while(1){                              // loop to print output to lcd display
+            lcd.print("Highest freq was ");      // prints maximum value to lcd display
+            lcd.print(maxval);
+            lcd.print(". Total count: ");      // prints total count to lcd display
+            lcd.print(totcount); 
+            lcd.setCursor(0, 1);      // moves cursor to next line
+            lcd.print("High freq timestamps: ");      // prints timestamps of max values to lcd display
+            for(int i = 0; i <= STEPS; i++){
+              if(EEPROM.read(i)==maxval){
+                lcd.print(i);
+                lcd.print(" ");
+              }
+            }
+            delay(4000);            // waits a little bit then scrolls lcd indefinitely
+            while(1){
+              lcd.scrollDisplayLeft();
+              delay(250);
+            }
+          }
+        }
+      }
+    }
+  }
+}
